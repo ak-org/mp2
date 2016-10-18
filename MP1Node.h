@@ -25,12 +25,14 @@
  * Note: You can change/add any functions in MP1Node.{h,cpp}
  */
 
+#define GOSSIPTIMEOUT 2
 /**
  * Message Types
  */
 enum MsgTypes{
     JOINREQ,
     JOINREP,
+    GOSSIP,
     DUMMYLASTMSGTYPE
 };
 
@@ -42,6 +44,12 @@ enum MsgTypes{
 typedef struct MessageHdr {
 	enum MsgTypes msgType;
 }MessageHdr;
+
+
+typedef struct GossipMsg {
+	MsgTypes msgType;
+	char *payload;
+}GossipMsg;
 
 /**
  * CLASS NAME: MP1Node
