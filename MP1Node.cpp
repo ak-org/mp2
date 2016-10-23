@@ -433,7 +433,7 @@ recvdMember.setid(recvdId);
                 recvdMember.timestamp = *(long *)(recvdGossipMsg->payload + i + sizeof(int) + sizeof(short)+sizeof(long));
                 
 
-
+                /*
                 
                 cout << "\nrecvd (GOSSIP) id , port : " << recvdMember.id << " , " << recvdMember.port 
                                                         << " heartbeat =  "
@@ -441,7 +441,7 @@ recvdMember.setid(recvdId);
                                                         << recvdMember.timestamp << " i : " << i << endl;
                       
                      
-
+                */
                              /* Merge the info to the local table */
                 for (int k = 0; k < memberTableSize; k++) {
                     if (recvdMember.id == self->addr.addr[0]) {
@@ -453,9 +453,10 @@ recvdMember.setid(recvdId);
                     }
                     else if (recvdMember.id == memberNode->memberList[k].id) {
                         /* update the heartbeat and timestamp, if received values are higher */
-                        
+                        /*
                         cout << "Update the entry for ( " << recvdMember.id 
                              << " ) by updating heartbeat and timestamp " << endl;    
+                        */     
                              
                         if (recvdMember.heartbeat > memberNode->memberList[k].heartbeat) {
                             memberNode->memberList[k].heartbeat = recvdMember.heartbeat;
@@ -542,10 +543,10 @@ void MP1Node::nodeLoopOps() {
         /* Increment heartbeat and update timestamp, if the entry belongs to self */
         
         if (memberNode->memberList[j].id == memberNode->addr.addr[0]) {
-            cout << "\nUpdating heartbeat and timestamp in the membership table" << endl;
+            /* cout << "\nUpdating heartbeat and timestamp in the membership table" << endl; */
             memberNode->memberList[j].timestamp = par->getcurrtime();
             memberNode->memberList[j].heartbeat++; 
-            cout << "Done Updating heartbeat and timestamp in the membership table" << endl;
+            /* cout << "Done Updating heartbeat and timestamp in the membership table" << endl; */
             
         }
 
@@ -608,11 +609,14 @@ void MP1Node::nodeLoopOps() {
     }
 
     memberTableSize = memberNode->memberList.size();
-    cout << "Membership List size (after removing faulty nodes) " << memberTableSize << endl;     
+    
+    cout << "Membership List size (after removing faulty nodes) " << memberTableSize << endl; 
+    /*    
     cout << "Current timestamp at " <<  memberNode->addr.getAddress() << " is " << myCurrTime <<endl;
+    */
     for (int i = 0; i < memberTableSize; i++) {  
-                cout << "timestamp in the Gossip table for " << memberNode->memberList[i].id << " is " 
-             << memberNode->memberList[i].timestamp << endl;
+                /* cout << "timestamp in the Gossip table for " << memberNode->memberList[i].id << " is " 
+             << memberNode->memberList[i].timestamp << endl; */
     }
 
      /* loop through the member table and send the gossip table to all nodes except to self */

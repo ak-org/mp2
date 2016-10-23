@@ -41,6 +41,7 @@ void MP2Node::updateRing() {
 	vector<Node> curMemList;
 	bool change = false;
 
+	vector<Node>::iterator it;
 	/*
 	 *  Step 1. Get the current membership list from Membership Protocol / MP1
 	 */
@@ -57,6 +58,123 @@ void MP2Node::updateRing() {
 	 * Step 3: Run the stabilization protocol IF REQUIRED
 	 */
 	// Run stabilization protocol if the hash table size is greater than zero and if there has been a changed in the ring
+
+	cout << "Called updateRing() , curMemList size is " << curMemList.size() << endl;
+
+	// Check for Ring table size 
+	// if it is zero, initialize the ring.
+	cout << "I am Node " << this->memberNode->addr.getAddress();
+	cout << " My Ring size is " << this->ring.size() << endl;
+
+	if (this->ring.size() == 0) {
+		// Initialize the ring. Since we are initializing the ring, the node is just joining for the first time
+		// hashtable is going to be empty
+
+		cout << "My Ring is empty " << endl;
+		it = this->ring.begin();
+		this->ring.insert(it, curMemList.begin(), curMemList.end());
+
+		cout << "Ring size is " << this->ring.size() << endl;
+
+		// Identify neighbors 
+
+		this->findNeighbors();
+
+	}
+
+	// If Memberlist table size is different than current hash table size 
+	// it means a node has joined or failed, time to update the ring table
+
+	if ( this->ring.size() != curMemList.size() ) {
+		cout << "Membership size has changed, Ring table has changed" << endl;
+		cout << "My current Ring size is " << this->ring.size() << endl;
+		it = this->ring.begin();
+		this->ring.insert(it, curMemList.begin(), curMemList.end());
+		cout << "Ring size is " << this->ring.size() << endl;
+		this->findNeighbors();
+		if (!this->ht->isEmpty()){
+			cout << "Time to call the stabilization protocol" << endl;
+		}
+	}
+
+
+
+}
+
+
+/**
+ * FUNCTION NAME: findNeighbors()
+ * DESCRIPTION : Identify you ownrself in the Ring
+ *               Pick next two nodes in the ring as successor 
+ *               Save information of these two nodes in the <hasmyReplica> 
+ *               Identify two predecessor nodes 
+ *               Save information of these two nodes in the  <haveReplicasOf>
+ */
+
+void MP2Node::findNeighbors() {
+	int selfIndex = 0;
+	int firstSuccessor = 0;
+	int secondSuccessor = 0;
+	int firstPredecessor = 0;
+	int secondPredecessor = 0;
+	int ringSize = this->ring.size();
+	vector<Node>::iterator it;
+
+	for (unsigned int i = 0; i < ringSize; i++) {
+		if (this->ring[i].nodeAddress.getAddress().compare(this->memberNode->addr.getAddress()) == 0) {
+			// We have found the index of current node in the sorted ring list 
+			selfIndex = i;
+			break;
+		}
+	}
+
+
+	if (selfIndex + 1 > ringSize) {
+		firstSuccessor = selfIndex + 1 - ringSize;
+	}
+	else {
+		firstSuccessor = selfIndex + 1;
+	}
+
+	if (selfIndex + 2 > ringSize) {
+		secondSuccessor = selfIndex + 2 - ringSize;
+	}
+	else {
+		secondSuccessor = selfIndex + 2;
+	}
+	
+	if (selfIndex - 1 < 0 ) {
+		firstPredecessor = selfIndex - 1 + ringSize;
+	}
+	else {
+		firstPredecessor = selfIndex - 1;
+	}
+
+	if (selfIndex - 2 < 0 ) {
+		secondPredecessor = selfIndex - 2 + ringSize;
+	}
+	else {
+		secondPredecessor = selfIndex - 2;
+	}
+
+	this->hasMyReplicas.clear();
+	this->hasMyReplicas.emplace_back(this->ring[firstSuccessor]);
+	this->hasMyReplicas.emplace_back(this->ring[secondSuccessor]);
+	
+	this->haveReplicasOf.clear();
+	this->haveReplicasOf.emplace_back(this->ring[firstPredecessor]);
+	this->haveReplicasOf.emplace_back(this->ring[secondPredecessor]);
+
+	cout << "Self Index is " << selfIndex 
+		 << " ,First Successor is " << firstSuccessor 
+		 << " ,Second Successor is " << secondSuccessor 
+		 << " ,First predecessor is " << firstPredecessor
+		 << " ,Second predecessor is " << secondPredecessor 
+		 << " ,Successor vector size is " << this->hasMyReplicas.size() 
+		 << " ,Predecessor vector size is " << this->haveReplicasOf.size()
+		 << endl;
+
+
 }
 
 /**
@@ -111,6 +229,41 @@ void MP2Node::clientCreate(string key, string value) {
 	/*
 	 * Implement this
 	 */
+
+	vector<Node> replicaCreate;
+
+	Message clientCreate(g_transID++, this->memberNode->addr, CREATE, key, value);
+
+	cout << endl << "Node "  << this->memberNode->addr.getAddress() 
+		 << " received a client create message with " << key 
+		 << "and " << value <<endl;
+
+
+	// call findNodes() to identify primary, secondary and tertiary replica nodes for the given key
+
+	replicaCreate = this->findNodes(key);
+
+	cout << "Primary Replica HashCode is " << replicaCreate[0].getHashCode() << endl;
+	cout << "Secondary Replica HashCode is " << replicaCreate[1].getHashCode() << endl;
+	cout << "Tertiary Replica HashCode is " << replicaCreate[2].getHashCode() << endl;
+
+	// send messages to the primary replica
+
+	clientCreate.replica = PRIMARY;
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[0].getAddress(), 
+	 				 (char *)&clientCreate, sizeof(Message));
+
+	// send message to both secondary replicas
+
+	clientCreate.replica = SECONDARY;
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[1].getAddress(), 
+	 				 (char *)&clientCreate, sizeof(Message));
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[2].getAddress(), 
+	 				 (char *)&clientCreate, sizeof(Message));
+
 }
 
 /**
@@ -126,6 +279,8 @@ void MP2Node::clientRead(string key){
 	/*
 	 * Implement this
 	 */
+
+
 }
 
 /**
@@ -237,20 +392,68 @@ void MP2Node::checkMessages() {
 	 * Declare your local variables here
 	 */
 
+	Message *recvdMsg;
+
 	// dequeue all messages and handle them
 	while ( !memberNode->mp2q.empty() ) {
 		/*
 		 * Pop a message from the queue
 		 */
+
 		data = (char *)memberNode->mp2q.front().elt;
 		size = memberNode->mp2q.front().size;
 		memberNode->mp2q.pop();
 
 		string message(data, data + size);
 
+		recvdMsg = (Message *)data;
+
 		/*
 		 * Handle the message types here
 		 */
+
+		cout << "Node " << this->memberNode->addr.getAddress();
+		cout << " Msg Key " << recvdMsg->key << " with value " << recvdMsg->value << endl;
+
+		switch(recvdMsg->type) {
+			case CREATE:
+				cout << " recvd a CREATE of type " << recvdMsg->type << endl;
+				break;
+			case READ:
+				cout << " recvd a READ of type " << recvdMsg->type << endl;
+				break;
+			case UPDATE:
+				cout << " recvd a UPDATE of type " << recvdMsg->type << endl;
+				break;
+			case DELETE:
+				cout << " recvd a DELETE of type " << recvdMsg->type << endl;
+				break;
+			case REPLY:
+				cout << " recvd a REPLY of type " << recvdMsg->type << endl;
+				break;
+			case READREPLY:
+				cout << " recvd a READREPLY of type " << recvdMsg->type << endl;
+				break;
+			default:
+				break;		
+
+
+		}
+ 
+		switch(recvdMsg->replica) {
+			case PRIMARY:
+				cout << " PRIMARY REPLICA NODE " << endl;
+				break;
+			case SECONDARY:
+				cout << " SECONDARY REPLICA NODE "  << endl;
+				break;
+			case TERTIARY:
+				cout << " TERTIARY REPLICA NODE "  << endl;
+				break;
+			default:
+				break;	
+
+		}
 
 	}
 
@@ -328,4 +531,17 @@ void MP2Node::stabilizationProtocol() {
 	/*
 	 * Implement this
 	 */
+
+	
+
+	if (this->ht->isEmpty() == true) {
+		// do nothing if hash table is empty
+		// purely defensive check
+		return;
+	}
+
+	// get current size of hash table
+
+
+
 }
