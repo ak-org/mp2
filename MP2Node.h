@@ -83,6 +83,7 @@ public:
 	bool createKeyValue(string key, string value, ReplicaType replica);
 	string readKey(string key);
 	bool updateKeyValue(string key, string value, ReplicaType replica);
+	void createReply(int transID, Address *toAddr, Address *fromAddr, MessageType type, bool result);
 	bool deletekey(string key);
 
 	// stabilization protocol - handle multiple failures

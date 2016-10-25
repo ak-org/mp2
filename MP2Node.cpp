@@ -254,7 +254,7 @@ void MP2Node::clientCreate(string key, string value) {
 	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[0].getAddress(), 
 	 				 (char *)&clientCreate, sizeof(Message));
 
-	// send message to both secondary replicas
+	// send message to both secondary and tertiary replicas
 
 	clientCreate.replica = SECONDARY;
 
@@ -263,6 +263,8 @@ void MP2Node::clientCreate(string key, string value) {
 
 	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[2].getAddress(), 
 	 				 (char *)&clientCreate, sizeof(Message));
+
+
 
 }
 
@@ -326,6 +328,12 @@ bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
 	 * Implement this
 	 */
 	// Insert key, value, replicaType into the hash table
+	bool retVal;
+
+	retVal = this->ht->create(key, value);
+
+	return retVal;
+
 }
 
 /**
@@ -356,6 +364,8 @@ bool MP2Node::updateKeyValue(string key, string value, ReplicaType replica) {
 	 * Implement this
 	 */
 	// Update key in local hash table and return true or false
+	
+
 }
 
 /**
@@ -373,6 +383,22 @@ bool MP2Node::deletekey(string key) {
 	// Delete the key from the local hash table
 }
 
+
+/**
+ * FUNCTION NAME: createReply
+ *
+ * DESCRIPTION: This function sends a Reply message in response to create.
+ * 				This function does the following:
+ * 				1) Creates a REPLY message
+ * 				2) Sends it back to the requestor
+ */
+void MP2Node::createReply(int transID, Address *toAddr, Address *fromAddr, MessageType type, bool result) {
+
+	Message createReply(transID, this->memberNode->addr, type, result);
+
+	this->emulNet->ENsend(&this->memberNode->addr, fromAddr, (char *)&createReply, sizeof(Message));
+
+}
 /**
  * FUNCTION NAME: checkMessages
  *
@@ -393,6 +419,7 @@ void MP2Node::checkMessages() {
 	 */
 
 	Message *recvdMsg;
+	bool result;
 
 	// dequeue all messages and handle them
 	while ( !memberNode->mp2q.empty() ) {
@@ -418,6 +445,28 @@ void MP2Node::checkMessages() {
 		switch(recvdMsg->type) {
 			case CREATE:
 				cout << " recvd a CREATE of type " << recvdMsg->type << endl;
+				result = this->createKeyValue(recvdMsg->key, recvdMsg->value, recvdMsg->replica);
+				
+				// log the result of keyvalue create operation
+
+				if (result) {
+					log->logCreateSuccess(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);
+				}
+				else {
+					log->logCreateFail(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);
+				}
+
+				// send a reply message to coordinator with the result of the operations
+
+				
+				this->createReply(g_transID++, &this->memberNode->addr, &recvdMsg->fromAddr,
+									CREATE, result);
+
+
+
+
 				break;
 			case READ:
 				cout << " recvd a READ of type " << recvdMsg->type << endl;
@@ -461,6 +510,8 @@ void MP2Node::checkMessages() {
 	 * This function should also ensure all READ and UPDATE operation
 	 * get QUORUM replies
 	 */
+
+
 }
 
 /**
