@@ -19,6 +19,11 @@
 #include "Message.h"
 #include "Queue.h"
 
+#define MAX_G_TRANS 200000
+#define REPLICA_QUORUM 2
+
+
+
 /**
  * CLASS NAME: MP2Node
  *
@@ -49,6 +54,8 @@ private:
 	Log * log;
 
 public:
+	int numSuccessReply[MAX_G_TRANS];
+	int numFailReply[MAX_G_TRANS];
 	MP2Node(Member *memberNode, Params *par, EmulNet *emulNet, Log *log, Address *addressOfMember);
 	Member * getMemberNode() {
 		return this->memberNode;
@@ -83,7 +90,7 @@ public:
 	bool createKeyValue(string key, string value, ReplicaType replica);
 	string readKey(string key);
 	bool updateKeyValue(string key, string value, ReplicaType replica);
-	void createReply(int transID, Address *toAddr, Address *fromAddr, MessageType type, bool result);
+	void createReply(int transID,  Address *toAddr, MessageType type, bool result, string key, string value, ReplicaType replica);
 	bool deletekey(string key);
 
 	// stabilization protocol - handle multiple failures

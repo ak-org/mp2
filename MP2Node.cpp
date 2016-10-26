@@ -5,6 +5,13 @@
  **********************************/
 #include "MP2Node.h"
 
+/*
+ * Global variables to store reply response count 
+ */
+
+int numSuccessReply[MAX_G_TRANS] = { [0 ... MAX_G_TRANS - 1] = 0 };;
+int numFailReply[MAX_G_TRANS] = { [0 ... MAX_G_TRANS - 1] = 0 };;
+
 /**
  * constructor
  */
@@ -236,7 +243,7 @@ void MP2Node::clientCreate(string key, string value) {
 
 	cout << endl << "Node "  << this->memberNode->addr.getAddress() 
 		 << " received a client create message with " << key 
-		 << "and " << value <<endl;
+		 << " and " << value <<endl;
 
 
 	// call findNodes() to identify primary, secondary and tertiary replica nodes for the given key
@@ -313,6 +320,41 @@ void MP2Node::clientDelete(string key){
 	/*
 	 * Implement this
 	 */
+
+
+	vector<Node> replicaDelete;
+
+	Message clientDelete(g_transID++, this->memberNode->addr, DELETE, key);
+
+	cout << endl << "Node "  << this->memberNode->addr.getAddress() 
+		 << " received a client delete message for " << key <<endl;
+
+
+	// call findNodes() to identify primary, secondary and tertiary replica nodes for the given key
+
+	replicaDelete = this->findNodes(key);
+
+	cout << "Primary Replica HashCode is " << replicaDelete[0].getHashCode() << endl;
+	cout << "Secondary Replica HashCode is " << replicaDelete[1].getHashCode() << endl;
+	cout << "Tertiary Replica HashCode is " << replicaDelete[2].getHashCode() << endl;
+
+	// send messages to the primary replica
+
+	clientDelete.replica = PRIMARY;
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaDelete[0].getAddress(), 
+	 				 (char *)&clientDelete, sizeof(Message));
+
+	// send message to both secondary and tertiary replicas
+
+	clientDelete.replica = SECONDARY;
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaDelete[1].getAddress(), 
+	 				 (char *)&clientDelete, sizeof(Message));
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaDelete[2].getAddress(), 
+	 				 (char *)&clientDelete, sizeof(Message));
+
 }
 
 /**
@@ -392,11 +434,18 @@ bool MP2Node::deletekey(string key) {
  * 				1) Creates a REPLY message
  * 				2) Sends it back to the requestor
  */
-void MP2Node::createReply(int transID, Address *toAddr, Address *fromAddr, MessageType type, bool result) {
+void MP2Node::createReply(int transID, Address *toAddr, MessageType type, 
+							bool result, string key, string value, ReplicaType replica) {
 
 	Message createReply(transID, this->memberNode->addr, type, result);
 
-	this->emulNet->ENsend(&this->memberNode->addr, fromAddr, (char *)&createReply, sizeof(Message));
+	createReply.key = key;
+	createReply.value = value;
+	createReply.replica = replica;
+
+	//int ENsend(Address *myaddr, Address *toaddr, char *data, int size);
+
+	this->emulNet->ENsend(&this->memberNode->addr, toAddr, (char *)&createReply, sizeof(Message));
 
 }
 /**
@@ -419,7 +468,9 @@ void MP2Node::checkMessages() {
 	 */
 
 	Message *recvdMsg;
+	Message *recvdReplyMsg;
 	bool result;
+
 
 	// dequeue all messages and handle them
 	while ( !memberNode->mp2q.empty() ) {
@@ -458,13 +509,12 @@ void MP2Node::checkMessages() {
 											recvdMsg->key, recvdMsg->value);
 				}
 
-				// send a reply message to coordinator with the result of the operations
+				// send a reply message to coordinator 
+				// with the result of the create entry operations using same transID
 
 				
-				this->createReply(g_transID++, &this->memberNode->addr, &recvdMsg->fromAddr,
-									CREATE, result);
-
-
+				this->createReply(recvdMsg->transID, &recvdMsg->fromAddr, 
+									REPLY, result, recvdMsg->key, recvdMsg->value, recvdMsg->replica);
 
 
 				break;
@@ -477,9 +527,47 @@ void MP2Node::checkMessages() {
 			case DELETE:
 				cout << " recvd a DELETE of type " << recvdMsg->type << endl;
 				break;
+
 			case REPLY:
-				cout << " recvd a REPLY of type " << recvdMsg->type << endl;
+				cout << " recvd a REPLY of type " << recvdMsg->type << " for transID " << recvdMsg->transID << endl;
+				// Coordinator receives a reply from all replicas
+				// if all three replicas replied with success, log success with coordinator flag enabled
+
+				if (recvdMsg->success == true) {
+					numSuccessReply[recvdMsg->transID]++;
+				} 
+				else if (recvdMsg->success == false) {
+					numFailReply[recvdMsg->transID]++;
+				}	
+
+				// if all 2 out of 3 replicas respond with success 
+				// coordinate mark the operation as success
+				// otherwise marks the operation as a failure
+				// reset response counters for success and failures
+
+				cout << "Success Replies = " << this->numSuccessReply[recvdMsg->transID] 
+					 << " Fail Replies = " << this->numFailReply[recvdMsg->transID] << endl;
+
+				if (numSuccessReply[recvdMsg->transID] + numFailReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
+					if ((this->numSuccessReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
+						(this->numFailReply[recvdMsg->transID] < REPLICA_QUORUM)) {
+						log->logCreateSuccess(&this->memberNode->addr, true, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);
+						this->numSuccessReply[recvdMsg->transID] = 0;
+						this->numFailReply[recvdMsg->transID] = 0;
+
+
+					}
+					else  {
+						log->logCreateFail(&this->memberNode->addr, true, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);
+						this->numSuccessReply[recvdMsg->transID]=0;
+						this->numFailReply[recvdMsg->transID] = 0;
+					}
+				}
+				
 				break;
+
 			case READREPLY:
 				cout << " recvd a READREPLY of type " << recvdMsg->type << endl;
 				break;
