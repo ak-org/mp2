@@ -3,7 +3,9 @@
  *
  * DESCRIPTION: MP2Node class definition
  **********************************/
+#include <string.h>
 #include "MP2Node.h"
+
 
 /*
  * Global variables to store reply response count 
@@ -289,6 +291,41 @@ void MP2Node::clientRead(string key){
 	 * Implement this
 	 */
 
+	vector<Node> replicaRead;
+
+	Message clientRead(g_transID++, this->memberNode->addr, READ, key);
+
+	cout << endl << "Node "  << this->memberNode->addr.getAddress() 
+		 << " received a client read message with " << key <<endl;
+
+
+	// call findNodes() to identify primary, secondary and tertiary replica nodes for the given key
+
+	replicaRead = this->findNodes(key);
+
+	cout << "Primary Replica HashCode is " << replicaRead[0].getHashCode() << endl;
+	cout << "Secondary Replica HashCode is " << replicaRead[1].getHashCode() << endl;
+	cout << "Tertiary Replica HashCode is " << replicaRead[2].getHashCode() << endl;
+
+	// send messages to the primary replica
+
+	clientRead.replica = PRIMARY;
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaRead[0].getAddress(), 
+	 				 (char *)&clientRead, sizeof(Message));
+
+	// send message to both secondary and tertiary replicas
+
+	clientRead.replica = SECONDARY;
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaRead[1].getAddress(), 
+	 				 (char *)&clientRead, sizeof(Message));
+
+	this->emulNet->ENsend(&this->memberNode->addr, replicaRead[2].getAddress(), 
+	 				 (char *)&clientRead, sizeof(Message));
+
+
+
 
 }
 
@@ -391,6 +428,13 @@ string MP2Node::readKey(string key) {
 	 * Implement this
 	 */
 	// Read key from local hash table and return value
+
+	string retVal;
+
+	retVal = this->ht->read(key);
+
+	return retVal;
+
 }
 
 /**
@@ -423,13 +467,19 @@ bool MP2Node::deletekey(string key) {
 	 * Implement this
 	 */
 	// Delete the key from the local hash table
+
+	bool retVal;
+
+	retVal = this->ht->deleteKey(key);
+
+	return retVal;
 }
 
 
 /**
  * FUNCTION NAME: createReply
  *
- * DESCRIPTION: This function sends a Reply message in response to create.
+ * DESCRIPTION: This function sends a Reply message in response to create or delete.
  * 				This function does the following:
  * 				1) Creates a REPLY message
  * 				2) Sends it back to the requestor
@@ -448,6 +498,31 @@ void MP2Node::createReply(int transID, Address *toAddr, MessageType type,
 	this->emulNet->ENsend(&this->memberNode->addr, toAddr, (char *)&createReply, sizeof(Message));
 
 }
+
+
+/**
+ * FUNCTION NAME: readReply
+ *
+ * DESCRIPTION: This function sends a ReadReply message in response to read request.
+ * 				This function does the following:
+ * 				1) Creates a READREPLY message
+ * 				2) Sends it back to the requestor
+ */
+void MP2Node::readReply(int transID, Address *toAddr, MessageType type, 
+							bool result, string key, string value) {
+
+	// construct read reply message
+	// Message(int _transID, Address _fromAddr, string _value);
+	Message readReply(transID, this->memberNode->addr, value);
+
+	readReply.key = key;
+	readReply.success = result;
+
+	this->emulNet->ENsend(&this->memberNode->addr, toAddr, (char *)&readReply, sizeof(Message));
+
+}
+
+
 /**
  * FUNCTION NAME: checkMessages
  *
@@ -470,6 +545,8 @@ void MP2Node::checkMessages() {
 	Message *recvdMsg;
 	Message *recvdReplyMsg;
 	bool result;
+	string readValue;
+	const char * returnedOp;
 
 
 	// dequeue all messages and handle them
@@ -516,19 +593,71 @@ void MP2Node::checkMessages() {
 				this->createReply(recvdMsg->transID, &recvdMsg->fromAddr, 
 									REPLY, result, recvdMsg->key, recvdMsg->value, recvdMsg->replica);
 
-
 				break;
 			case READ:
 				cout << " recvd a READ of type " << recvdMsg->type << endl;
+
+				readValue = this->readKey(recvdMsg->key);
+				
+				// log the result of keyvalue create operation
+
+				if (readValue != "") {
+					log->logReadSuccess(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key, readValue);
+					result = true;
+				}
+				else {
+					log->logReadFail(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key);
+					result = false;
+				}
+
+				// send a reply message to coordinator 
+				// with the result of the create entry operations using same transID
+
+				this->readReply(recvdMsg->transID, &recvdMsg->fromAddr, 
+									READREPLY, result, recvdMsg->key, readValue);
+
+				break;				
+
+
 				break;
 			case UPDATE:
 				cout << " recvd a UPDATE of type " << recvdMsg->type << endl;
 				break;
 			case DELETE:
 				cout << " recvd a DELETE of type " << recvdMsg->type << endl;
+				result = this->deletekey(recvdMsg->key);
+				
+				// log the result of keyvalue create operation
+
+				if (result) {
+					log->logDeleteSuccess(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key);
+				}
+				else {
+					log->logDeleteFail(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key);
+				}
+
+				// send a reply message to coordinator 
+				// with the result of the create entry operations using same transID
+				// in case of delete set the value field to DELETED
+				// coordinate will know that this is a reply for a DELETE message and log
+				// the operation result accordingly
+
+				
+				this->createReply(recvdMsg->transID, &recvdMsg->fromAddr, 
+									REPLY, result, recvdMsg->key, "DELETED", recvdMsg->replica);
+
+
 				break;
 
+
 			case REPLY:
+				// extract c string version of the value returned in the msg 
+				// this is necessary to do  strcmp
+				returnedOp = recvdMsg->value.c_str();
 				cout << " recvd a REPLY of type " << recvdMsg->type << " for transID " << recvdMsg->transID << endl;
 				// Coordinator receives a reply from all replicas
 				// if all three replicas replied with success, log success with coordinator flag enabled
@@ -546,21 +675,32 @@ void MP2Node::checkMessages() {
 				// reset response counters for success and failures
 
 				cout << "Success Replies = " << this->numSuccessReply[recvdMsg->transID] 
-					 << " Fail Replies = " << this->numFailReply[recvdMsg->transID] << endl;
+					 << " Fail Replies = " << this->numFailReply[recvdMsg->transID] << endl;	 
 
 				if (numSuccessReply[recvdMsg->transID] + numFailReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
 					if ((this->numSuccessReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
 						(this->numFailReply[recvdMsg->transID] < REPLICA_QUORUM)) {
-						log->logCreateSuccess(&this->memberNode->addr, true, recvdMsg->transID, 
-											recvdMsg->key, recvdMsg->value);
+						if (strcmp(returnedOp, "DELETED") == 0) {
+						    log->logDeleteSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
+
+						}
+						else {
+						    log->logCreateSuccess(&this->memberNode->addr, true, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);							
+						}
+
 						this->numSuccessReply[recvdMsg->transID] = 0;
 						this->numFailReply[recvdMsg->transID] = 0;
-
-
 					}
 					else  {
-						log->logCreateFail(&this->memberNode->addr, true, recvdMsg->transID, 
+						if (strcmp(returnedOp, "DELETED") == 0) {
+						    log->logDeleteFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
+
+						}
+						else {
+							log->logCreateFail(&this->memberNode->addr, true, recvdMsg->transID, 
 											recvdMsg->key, recvdMsg->value);
+						}	
 						this->numSuccessReply[recvdMsg->transID]=0;
 						this->numFailReply[recvdMsg->transID] = 0;
 					}
@@ -570,10 +710,51 @@ void MP2Node::checkMessages() {
 
 			case READREPLY:
 				cout << " recvd a READREPLY of type " << recvdMsg->type << endl;
+
+				if (recvdMsg->success == true) {
+					numSuccessReply[recvdMsg->transID]++;
+				} 
+				else if (recvdMsg->success == false) {
+					numFailReply[recvdMsg->transID]++;
+				}
+
+				cout << "Success Replies (READREPLY) = " << this->numSuccessReply[recvdMsg->transID] 
+					 << " Fail Replies (READREPLY) = " << this->numFailReply[recvdMsg->transID] << endl;	 
+
+				if (numSuccessReply[recvdMsg->transID] + numFailReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
+					if ((this->numSuccessReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
+						(this->numFailReply[recvdMsg->transID] < REPLICA_QUORUM)) {
+
+						log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+						this->numSuccessReply[recvdMsg->transID] = 0;
+						this->numFailReply[recvdMsg->transID] = 0;							
+					}
+					else if ((this->numSuccessReply[recvdMsg->transID] < REPLICA_QUORUM) && 
+						(this->numFailReply[recvdMsg->transID] >= REPLICA_QUORUM)) {
+						log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
+						this->numSuccessReply[recvdMsg->transID] = 0;
+						this->numFailReply[recvdMsg->transID] = 0;
+					}
+					else {
+						log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
+						this->numSuccessReply[recvdMsg->transID] = 0;
+						this->numFailReply[recvdMsg->transID] = 0;	
+					}
+				} 
+				else if (numSuccessReply[recvdMsg->transID] == REPLICA_QUORUM) {
+					log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+						this->numSuccessReply[recvdMsg->transID] = 0;
+						this->numFailReply[recvdMsg->transID] = 0;
+				}
+
+
+
+
+
 				break;
+
 			default:
 				break;		
-
 
 		}
  
