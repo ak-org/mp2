@@ -97,12 +97,14 @@ void MP2Node::updateRing() {
 	if ( this->ring.size() != curMemList.size() ) {
 		cout << "Membership size has changed, Ring table has changed" << endl;
 		cout << "My current Ring size is " << this->ring.size() << endl;
+		this->ring.clear();
 		it = this->ring.begin();
 		this->ring.insert(it, curMemList.begin(), curMemList.end());
 		cout << "Ring size is " << this->ring.size() << endl;
 		this->findNeighbors();
 		if (!this->ht->isEmpty()){
 			cout << "Time to call the stabilization protocol" << endl;
+
 		}
 	}
 
@@ -709,6 +711,11 @@ void MP2Node::checkMessages() {
 				break;
 
 			case READREPLY:
+
+				/*
+					mp2[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+					mp1[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+				*/	
 				cout << " recvd a READREPLY of type " << recvdMsg->type << endl;
 
 				if (recvdMsg->success == true) {
@@ -861,6 +868,7 @@ void MP2Node::stabilizationProtocol() {
 	}
 
 	// get current size of hash table
+
 
 
 
