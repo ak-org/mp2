@@ -19,7 +19,7 @@
 #include "Message.h"
 #include "Queue.h"
 
-#define MAX_G_TRANS 200000
+#define MAX_G_TRANS 20000
 #define REPLICA_QUORUM 2
 
 
@@ -56,6 +56,8 @@ private:
 public:
 	int numSuccessReply[MAX_G_TRANS];
 	int numFailReply[MAX_G_TRANS];
+	int numSuccessRReply[MAX_G_TRANS];
+	int numFailRReply[MAX_G_TRANS];
 	MP2Node(Member *memberNode, Params *par, EmulNet *emulNet, Log *log, Address *addressOfMember);
 	Member * getMemberNode() {
 		return this->memberNode;

@@ -5,14 +5,15 @@
  **********************************/
 #include <string.h>
 #include "MP2Node.h"
+#include "hashtable.h"
 
 
 /*
  * Global variables to store reply response count 
  */
 
-int numSuccessReply[MAX_G_TRANS] = { [0 ... MAX_G_TRANS - 1] = 0 };;
-int numFailReply[MAX_G_TRANS] = { [0 ... MAX_G_TRANS - 1] = 0 };;
+int numSuccessReply[MAX_G_TRANS] = { [0 ... MAX_G_TRANS - 1] = 0 };
+int numFailReply[MAX_G_TRANS] = { [0 ... MAX_G_TRANS - 1] = 0 };
 
 /**
  * constructor
@@ -100,10 +101,12 @@ void MP2Node::updateRing() {
 		this->ring.clear();
 		it = this->ring.begin();
 		this->ring.insert(it, curMemList.begin(), curMemList.end());
-		cout << "Ring size is " << this->ring.size() << endl;
+		cout << "Updated Ring size is " << this->ring.size() << endl;
+		cout << "Hash table size is " << this->ht->currentSize() << endl;
 		this->findNeighbors();
 		if (!this->ht->isEmpty()){
 			cout << "Time to call the stabilization protocol" << endl;
+			this->stabilizationProtocol();
 
 		}
 	}
@@ -140,19 +143,10 @@ void MP2Node::findNeighbors() {
 	}
 
 
-	if (selfIndex + 1 > ringSize) {
-		firstSuccessor = selfIndex + 1 - ringSize;
-	}
-	else {
-		firstSuccessor = selfIndex + 1;
-	}
+	
+	firstSuccessor = (selfIndex + 1) % (ringSize);
+	secondSuccessor = (selfIndex + 2) % (ringSize);
 
-	if (selfIndex + 2 > ringSize) {
-		secondSuccessor = selfIndex + 2 - ringSize;
-	}
-	else {
-		secondSuccessor = selfIndex + 2;
-	}
 	
 	if (selfIndex - 1 < 0 ) {
 		firstPredecessor = selfIndex - 1 + ringSize;
@@ -272,6 +266,8 @@ void MP2Node::clientCreate(string key, string value) {
 	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[1].getAddress(), 
 	 				 (char *)&clientCreate, sizeof(Message));
 
+	clientCreate.replica = TERTIARY;
+
 	this->emulNet->ENsend(&this->memberNode->addr, replicaCreate[2].getAddress(), 
 	 				 (char *)&clientCreate, sizeof(Message));
 
@@ -294,6 +290,9 @@ void MP2Node::clientRead(string key){
 	 */
 
 	vector<Node> replicaRead;
+	int PrimarySend;
+	int SecondarySend;
+	int TertiarySend;
 
 	Message clientRead(g_transID++, this->memberNode->addr, READ, key);
 
@@ -305,27 +304,44 @@ void MP2Node::clientRead(string key){
 
 	replicaRead = this->findNodes(key);
 
-	cout << "Primary Replica HashCode is " << replicaRead[0].getHashCode() << endl;
-	cout << "Secondary Replica HashCode is " << replicaRead[1].getHashCode() << endl;
-	cout << "Tertiary Replica HashCode is " << replicaRead[2].getHashCode() << endl;
+	cout << "Read with Trans ID " << clientRead.transID << endl;
+	cout << "Replica 0 HashCode is " << replicaRead[0].getHashCode() << endl;
+	cout << "Replica 1 HashCode is " << replicaRead[1].getHashCode() << endl;
+	cout << "Replica 2 HashCode is " << replicaRead[2].getHashCode() << endl;
+	cout << "Replica 0 Address is " << replicaRead[0].nodeAddress.getAddress() << endl;
+	cout << "Replica 1 Address is " << replicaRead[1].nodeAddress.getAddress() << endl;
+	cout << "Replica 2 Address is " << replicaRead[2].nodeAddress.getAddress() << endl;
 
 	// send messages to the primary replica
 
-	clientRead.replica = PRIMARY;
+		/*
+					mp2[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+					mp1[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+		*/
 
-	this->emulNet->ENsend(&this->memberNode->addr, replicaRead[0].getAddress(), 
+		/*
+					mp2[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+					mp1[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
+		*/
+
+
+	// if replica failure is greater than REPLICA QUORUM, 
+	// do not bother to send READ message
+	// log failure 
+	
+
+
+	PrimarySend = this->emulNet->ENsend(&this->memberNode->addr, replicaRead[0].getAddress(), 
 	 				 (char *)&clientRead, sizeof(Message));
 
-	// send message to both secondary and tertiary replicas
-
-	clientRead.replica = SECONDARY;
-
-	this->emulNet->ENsend(&this->memberNode->addr, replicaRead[1].getAddress(), 
+	SecondarySend = this->emulNet->ENsend(&this->memberNode->addr, replicaRead[1].getAddress(), 
 	 				 (char *)&clientRead, sizeof(Message));
 
-	this->emulNet->ENsend(&this->memberNode->addr, replicaRead[2].getAddress(), 
+	TertiarySend = this->emulNet->ENsend(&this->memberNode->addr, replicaRead[2].getAddress(), 
 	 				 (char *)&clientRead, sizeof(Message));
 
+	cout << "Send return values are " << PrimarySend << " , " << SecondarySend << " , " 
+									  << TertiarySend << endl;
 
 
 
@@ -344,6 +360,36 @@ void MP2Node::clientUpdate(string key, string value){
 	/*
 	 * Implement this
 	 */
+
+	int replicaFailCount = 0;
+	vector<Node> replicaUpdate;
+
+	Message clientUpdate(g_transID++, this->memberNode->addr, UPDATE, key, value);
+
+	replicaUpdate = this->findNodes(key);
+	cout << "Update\n";
+	cout << "Replica 0 HashCode is " << replicaUpdate[0].getHashCode() << endl;
+	cout << "Replica 1 HashCode is " << replicaUpdate[1].getHashCode() << endl;
+	cout << "Replica 2 HashCode is " << replicaUpdate[2].getHashCode() << endl;
+	cout << "Replica 0 Address is " << replicaUpdate[0].nodeAddress.getAddress() << endl;
+	cout << "Replica 1 Address is " << replicaUpdate[1].nodeAddress.getAddress() << endl;
+	cout << "Replica 2 Address is " << replicaUpdate[2].nodeAddress.getAddress() << endl;	
+
+
+	// send messages to the primary replica
+	clientUpdate.replica = PRIMARY;
+	this->emulNet->ENsend(&this->memberNode->addr, replicaUpdate[0].getAddress(), 
+	 				 (char *)&clientUpdate, sizeof(Message));
+
+	// send message to both secondary and tertiary replicas
+	clientUpdate.replica = SECONDARY;
+	this->emulNet->ENsend(&this->memberNode->addr, replicaUpdate[1].getAddress(), 
+	 				 (char *)&clientUpdate, sizeof(Message));
+	clientUpdate.replica = TERTIARY;
+	this->emulNet->ENsend(&this->memberNode->addr, replicaUpdate[2].getAddress(), 
+	 				 (char *)&clientUpdate, sizeof(Message));
+
+ 	
 }
 
 /**
@@ -360,7 +406,7 @@ void MP2Node::clientDelete(string key){
 	 * Implement this
 	 */
 
-
+	int replicaFailCount = 0;
 	vector<Node> replicaDelete;
 
 	Message clientDelete(g_transID++, this->memberNode->addr, DELETE, key);
@@ -394,6 +440,9 @@ void MP2Node::clientDelete(string key){
 	this->emulNet->ENsend(&this->memberNode->addr, replicaDelete[2].getAddress(), 
 	 				 (char *)&clientDelete, sizeof(Message));
 
+ 	
+
+
 }
 
 /**
@@ -409,10 +458,21 @@ bool MP2Node::createKeyValue(string key, string value, ReplicaType replica) {
 	 * Implement this
 	 */
 	// Insert key, value, replicaType into the hash table
-	bool retVal;
 
-	retVal = this->ht->create(key, value);
+	bool retVal = true;
 
+	// check if key already exists in the hashtable
+	// if so, return true and do not add duplicate entry
+
+	if (this->ht->read(key) == "") {
+		cout << " Key already not exists in the hash table at node " << key << " " << this->memberNode->addr.getAddress() <<endl;
+		retVal = this->ht->create(key, value);
+	}
+	else {
+		cout << " Key exists in the hash table at node " << key << " " << this->memberNode->addr.getAddress() <<endl;
+	
+	}
+	
 	return retVal;
 
 }
@@ -452,6 +512,12 @@ bool MP2Node::updateKeyValue(string key, string value, ReplicaType replica) {
 	 * Implement this
 	 */
 	// Update key in local hash table and return true or false
+
+	bool retVal;
+
+	retVal = this->ht->update(key, value);
+
+	return retVal;
 	
 
 }
@@ -481,7 +547,7 @@ bool MP2Node::deletekey(string key) {
 /**
  * FUNCTION NAME: createReply
  *
- * DESCRIPTION: This function sends a Reply message in response to create or delete.
+ * DESCRIPTION: This function sends a Reply message in response to create,  or delete.
  * 				This function does the following:
  * 				1) Creates a REPLY message
  * 				2) Sends it back to the requestor
@@ -549,7 +615,9 @@ void MP2Node::checkMessages() {
 	bool result;
 	string readValue;
 	const char * returnedOp;
-
+	int currTransID = 0;
+	string currKey;
+	string currValue;
 
 	// dequeue all messages and handle them
 	while ( !memberNode->mp2q.empty() ) {
@@ -573,6 +641,7 @@ void MP2Node::checkMessages() {
 		cout << " Msg Key " << recvdMsg->key << " with value " << recvdMsg->value << endl;
 
 		switch(recvdMsg->type) {
+
 			case CREATE:
 				cout << " recvd a CREATE of type " << recvdMsg->type << endl;
 				result = this->createKeyValue(recvdMsg->key, recvdMsg->value, recvdMsg->replica);
@@ -596,6 +665,7 @@ void MP2Node::checkMessages() {
 									REPLY, result, recvdMsg->key, recvdMsg->value, recvdMsg->replica);
 
 				break;
+
 			case READ:
 				cout << " recvd a READ of type " << recvdMsg->type << endl;
 
@@ -622,11 +692,25 @@ void MP2Node::checkMessages() {
 
 				break;				
 
+			case UPDATE:
+				cout << " recvd an UPDATE of type " << recvdMsg->type << endl;
+
+				result = this->updateKeyValue(recvdMsg->key, recvdMsg->value, recvdMsg->replica);
+
+				if (result) {
+					log->logUpdateSuccess(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);
+				}
+				else {
+					log->logUpdateFail(&this->memberNode->addr, false, recvdMsg->transID, 
+											recvdMsg->key, recvdMsg->value);
+				}		
+
+				this->createReply(recvdMsg->transID, &recvdMsg->fromAddr, 
+									REPLY, result, recvdMsg->key, recvdMsg->value, recvdMsg->replica);		
 
 				break;
-			case UPDATE:
-				cout << " recvd a UPDATE of type " << recvdMsg->type << endl;
-				break;
+
 			case DELETE:
 				cout << " recvd a DELETE of type " << recvdMsg->type << endl;
 				result = this->deletekey(recvdMsg->key);
@@ -654,7 +738,6 @@ void MP2Node::checkMessages() {
 
 
 				break;
-
 
 			case REPLY:
 				// extract c string version of the value returned in the msg 
@@ -712,51 +795,61 @@ void MP2Node::checkMessages() {
 
 			case READREPLY:
 
-				/*
-					mp2[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
-					mp1[nodesToFail.at(i)]->getMemberNode()->bFailed = true;
-				*/	
-				cout << " recvd a READREPLY of type " << recvdMsg->type << endl;
+	
+				cout << " \nrecvd a READREPLY of type " << recvdMsg->type << " with transID=" <<  recvdMsg->transID << endl;
 
 				if (recvdMsg->success == true) {
-					numSuccessReply[recvdMsg->transID]++;
+				
+						numSuccessRReply[recvdMsg->transID]++;
+						cout << " READREPLY Incremented success counter " << numSuccessRReply[recvdMsg->transID] 
+							 << " Trans ID is = " << recvdMsg->transID << endl;
 				} 
 				else if (recvdMsg->success == false) {
-					numFailReply[recvdMsg->transID]++;
+					numFailRReply[recvdMsg->transID]++;
+					cout << " READREPLY Incremented failure counter " << numFailReply[recvdMsg->transID] 
+					     << " Trans ID is = " << recvdMsg->transID << endl;
 				}
 
-				cout << "Success Replies (READREPLY) = " << this->numSuccessReply[recvdMsg->transID] 
-					 << " Fail Replies (READREPLY) = " << this->numFailReply[recvdMsg->transID] << endl;	 
+				if (numSuccessRReply[recvdMsg->transID] == 1) {
+					currTransID = recvdMsg->transID;
+					currKey = recvdMsg->key;
+					currValue = recvdMsg->value;
+				}
 
-				if (numSuccessReply[recvdMsg->transID] + numFailReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
-					if ((this->numSuccessReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
-						(this->numFailReply[recvdMsg->transID] < REPLICA_QUORUM)) {
+				cout << "\nSuccess Replies (READREPLY) = " << this->numSuccessRReply[recvdMsg->transID] 
+					 << " Fail Replies (READREPLY) = " << this->numFailRReply[recvdMsg->transID] << endl;	 
 
-						log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
-						this->numSuccessReply[recvdMsg->transID] = 0;
-						this->numFailReply[recvdMsg->transID] = 0;							
+				if (this->numSuccessRReply[recvdMsg->transID] == REPLICA_QUORUM) {
+					log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+				}
+
+				if (numSuccessRReply[recvdMsg->transID] + numFailRReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
+					if ((this->numSuccessRReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
+						(this->numFailRReply[recvdMsg->transID] < REPLICA_QUORUM)) {
+
+						//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+						//this->numSuccessReply[recvdMsg->transID] = 0;
+						//this->numFailReply[recvdMsg->transID] = 0;	
+												
 					}
-					else if ((this->numSuccessReply[recvdMsg->transID] < REPLICA_QUORUM) && 
-						(this->numFailReply[recvdMsg->transID] >= REPLICA_QUORUM)) {
+					else if ((this->numSuccessRReply[recvdMsg->transID] < REPLICA_QUORUM) && 
+						(this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)) {
 						log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
-						this->numSuccessReply[recvdMsg->transID] = 0;
-						this->numFailReply[recvdMsg->transID] = 0;
+						//this->numSuccessReply[recvdMsg->transID] = 0;
+						//this->numFailReply[recvdMsg->transID] = 0;
 					}
-					else {
+					else if ((this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)){
 						log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
-						this->numSuccessReply[recvdMsg->transID] = 0;
-						this->numFailReply[recvdMsg->transID] = 0;	
+						//this->numSuccessReply[recvdMsg->transID] = 0;
+						//this->numFailReply[recvdMsg->transID] = 0;	
 					}
 				} 
-				else if (numSuccessReply[recvdMsg->transID] == REPLICA_QUORUM) {
-					log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
-						this->numSuccessReply[recvdMsg->transID] = 0;
-						this->numFailReply[recvdMsg->transID] = 0;
+				else {
+					//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+						//this->numSuccessReply[recvdMsg->transID] = 0;
+						//this->numFailReply[recvdMsg->transID] = 0;		
 				}
-
-
-
-
+				cout << "END READREPLY Transaction ID = " << currTransID << endl << endl;
 
 				break;
 
@@ -787,7 +880,16 @@ void MP2Node::checkMessages() {
 	 * get QUORUM replies
 	 */
 
-
+	for (int i = 0; i < MAX_G_TRANS; i++) {
+		if (numSuccessRReply[i] == 1) {
+			/* we have a prev readreply with just 1 ack */
+			cout << "Alert! Found a READREPLY with just 1 ACK. TransID = " << i << endl;
+			log->logReadFail(&this->memberNode->addr, true, i, currKey);
+			numSuccessRReply[i] = 0;
+			break;
+		}
+	}
+					
 }
 
 /**
@@ -860,7 +962,7 @@ void MP2Node::stabilizationProtocol() {
 	 */
 
 	
-
+	cout << " Stablization Protocol BEGIN : " << this->memberNode->addr.getAddress() <<" .Current hast table size is " << this->ht->currentSize() << endl;
 	if (this->ht->isEmpty() == true) {
 		// do nothing if hash table is empty
 		// purely defensive check
@@ -868,8 +970,25 @@ void MP2Node::stabilizationProtocol() {
 	}
 
 	// get current size of hash table
+	// go through each entry and send create request to its two successors
+	cout << "Stablization Protocol : My hash table entries are " << endl;
+	for (std::map<string, string>::iterator it=this->ht->hashTable.begin(); it != this->ht->hashTable.end(); ++it) {
+		 std::cout << it->first << " => " << it->second << '\n';
+		 // do create for each key
+		 // if key exists at a node, it will ignore the create request
+		 // otherwise, it will create a key, value entry in the hastable
+		 this->clientCreate(it->first, it->second);
 
 
+	}
+	cout << endl;	
 
+	cout << " Stablization Protocol END : " << this->memberNode->addr.getAddress() <<" .Current hast table size is " << this->ht->currentSize() << endl;
+	if (this->ht->isEmpty() == true) {
+		// do nothing if hash table is empty
+		// purely defensive check
+		return;
+	}
+	
 
 }
