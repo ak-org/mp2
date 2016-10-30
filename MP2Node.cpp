@@ -385,6 +385,7 @@ void MP2Node::clientUpdate(string key, string value){
 	clientUpdate.replica = SECONDARY;
 	this->emulNet->ENsend(&this->memberNode->addr, replicaUpdate[1].getAddress(), 
 	 				 (char *)&clientUpdate, sizeof(Message));
+
 	clientUpdate.replica = TERTIARY;
 	this->emulNet->ENsend(&this->memberNode->addr, replicaUpdate[2].getAddress(), 
 	 				 (char *)&clientUpdate, sizeof(Message));
@@ -592,6 +593,32 @@ void MP2Node::readReply(int transID, Address *toAddr, MessageType type,
 
 
 /**
+ * FUNCTION NAME: readReply
+ *
+ * DESCRIPTION: This function sends a ReadReply message in response to read request.
+ * 				This function does the following:
+ * 				1) Creates a READREPLY message
+ * 				2) Sends it back to the requestor
+ */
+void MP2Node::updateReply(int transID, Address *toAddr, MessageType type, 
+							bool result, string key, string value) {
+
+	// construct read reply message
+	// Message(int _transID, Address _fromAddr, string _value);
+	Message updateReply(transID, this->memberNode->addr, value);
+
+	updateReply.key = key;
+	updateReply.success = result;
+	updateReply.delimiter = "||"; // different delimiter to differentiate between READREPLY and UPDATEREPLY
+
+
+	this->emulNet->ENsend(&this->memberNode->addr, toAddr, (char *)&updateReply, sizeof(Message));
+
+}
+
+
+
+/**
  * FUNCTION NAME: checkMessages
  *
  * DESCRIPTION: This function is the message handler of this node.
@@ -628,6 +655,7 @@ void MP2Node::checkMessages() {
 		data = (char *)memberNode->mp2q.front().elt;
 		size = memberNode->mp2q.front().size;
 		memberNode->mp2q.pop();
+		string updateDelimiter = "||";
 
 		string message(data, data + size);
 
@@ -706,8 +734,8 @@ void MP2Node::checkMessages() {
 											recvdMsg->key, recvdMsg->value);
 				}		
 
-				this->createReply(recvdMsg->transID, &recvdMsg->fromAddr, 
-									REPLY, result, recvdMsg->key, recvdMsg->value, recvdMsg->replica);		
+				this->updateReply(recvdMsg->transID, &recvdMsg->fromAddr, 
+									READREPLY, result, recvdMsg->key, recvdMsg->value);		
 
 				break;
 
@@ -794,62 +822,123 @@ void MP2Node::checkMessages() {
 				break;
 
 			case READREPLY:
+				cout << "Delimiter is " << recvdMsg->delimiter << endl;
+				if (recvdMsg->delimiter.compare(updateDelimiter) == 0) {
+					// this is a READREPLY for an update request
+					cout << " \nrecvd a UPDATEREPLY of type " << recvdMsg->type << " with transID=" <<  recvdMsg->transID << endl;
 
-	
-				cout << " \nrecvd a READREPLY of type " << recvdMsg->type << " with transID=" <<  recvdMsg->transID << endl;
+					if (recvdMsg->success == true) {
+					
+							numSuccessRReply[recvdMsg->transID]++;
+							cout << " UPDATEREPLY Incremented success counter " << numSuccessRReply[recvdMsg->transID] 
+								 << " Trans ID is = " << recvdMsg->transID << endl;
+					} 
+					else if (recvdMsg->success == false) {
+						numFailRReply[recvdMsg->transID]++;
+						cout << " UPDATEREPLY Incremented failure counter " << numFailReply[recvdMsg->transID] 
+						     << " Trans ID is = " << recvdMsg->transID << endl;
+					}
 
-				if (recvdMsg->success == true) {
-				
-						numSuccessRReply[recvdMsg->transID]++;
-						cout << " READREPLY Incremented success counter " << numSuccessRReply[recvdMsg->transID] 
-							 << " Trans ID is = " << recvdMsg->transID << endl;
-				} 
-				else if (recvdMsg->success == false) {
-					numFailRReply[recvdMsg->transID]++;
-					cout << " READREPLY Incremented failure counter " << numFailReply[recvdMsg->transID] 
-					     << " Trans ID is = " << recvdMsg->transID << endl;
-				}
+					if (numSuccessRReply[recvdMsg->transID] == 1) {
+						currTransID = recvdMsg->transID;
+						currKey = recvdMsg->key;
+						currValue = recvdMsg->value;
+					}
 
-				if (numSuccessRReply[recvdMsg->transID] == 1) {
-					currTransID = recvdMsg->transID;
-					currKey = recvdMsg->key;
-					currValue = recvdMsg->value;
-				}
+					cout << "\nSuccess Replies (UPDATEREPLY) = " << this->numSuccessRReply[recvdMsg->transID] 
+						 << " Fail Replies (UPDATEREPLY) = " << this->numFailRReply[recvdMsg->transID] << endl;	 
 
-				cout << "\nSuccess Replies (READREPLY) = " << this->numSuccessRReply[recvdMsg->transID] 
-					 << " Fail Replies (READREPLY) = " << this->numFailRReply[recvdMsg->transID] << endl;	 
+					if (this->numSuccessRReply[recvdMsg->transID] == REPLICA_QUORUM) {
+						log->logUpdateSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+					}
 
-				if (this->numSuccessRReply[recvdMsg->transID] == REPLICA_QUORUM) {
-					log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
-				}
+					if (numSuccessRReply[recvdMsg->transID] + numFailRReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
+						if ((this->numSuccessRReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
+							(this->numFailRReply[recvdMsg->transID] < REPLICA_QUORUM)) {
 
-				if (numSuccessRReply[recvdMsg->transID] + numFailRReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
-					if ((this->numSuccessRReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
-						(this->numFailRReply[recvdMsg->transID] < REPLICA_QUORUM)) {
-
+							//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;	
+													
+						}
+						else if ((this->numSuccessRReply[recvdMsg->transID] < REPLICA_QUORUM) && 
+							(this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)) {
+							log->logUpdateFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);							
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;
+						}
+						else if ((this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)){
+							log->logUpdateFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);							
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;	
+						}
+					} 
+					else {
 						//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
-						//this->numSuccessReply[recvdMsg->transID] = 0;
-						//this->numFailReply[recvdMsg->transID] = 0;	
-												
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;		
 					}
-					else if ((this->numSuccessRReply[recvdMsg->transID] < REPLICA_QUORUM) && 
-						(this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)) {
-						log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
-						//this->numSuccessReply[recvdMsg->transID] = 0;
-						//this->numFailReply[recvdMsg->transID] = 0;
-					}
-					else if ((this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)){
-						log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
-						//this->numSuccessReply[recvdMsg->transID] = 0;
-						//this->numFailReply[recvdMsg->transID] = 0;	
-					}
-				} 
-				else {
-					//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
-						//this->numSuccessReply[recvdMsg->transID] = 0;
-						//this->numFailReply[recvdMsg->transID] = 0;		
+					cout << "END UPDATEREPLY Transaction ID = " << currTransID << endl << endl;
+
 				}
-				cout << "END READREPLY Transaction ID = " << currTransID << endl << endl;
+				else {
+					cout << " \nrecvd a READREPLY of type " << recvdMsg->type << " with transID=" <<  recvdMsg->transID << endl;
+
+					if (recvdMsg->success == true) {
+					
+							numSuccessRReply[recvdMsg->transID]++;
+							cout << " READREPLY Incremented success counter " << numSuccessRReply[recvdMsg->transID] 
+								 << " Trans ID is = " << recvdMsg->transID << endl;
+					} 
+					else if (recvdMsg->success == false) {
+						numFailRReply[recvdMsg->transID]++;
+						cout << " READREPLY Incremented failure counter " << numFailReply[recvdMsg->transID] 
+						     << " Trans ID is = " << recvdMsg->transID << endl;
+					}
+
+					if (numSuccessRReply[recvdMsg->transID] == 1) {
+						currTransID = recvdMsg->transID;
+						currKey = recvdMsg->key;
+						currValue = recvdMsg->value;
+					}
+
+					cout << "\nSuccess Replies (READREPLY) = " << this->numSuccessRReply[recvdMsg->transID] 
+						 << " Fail Replies (READREPLY) = " << this->numFailRReply[recvdMsg->transID] << endl;	 
+
+					if (this->numSuccessRReply[recvdMsg->transID] == REPLICA_QUORUM) {
+						log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+					}
+
+					if (numSuccessRReply[recvdMsg->transID] + numFailRReply[recvdMsg->transID] == REPLICA_QUORUM + 1) {
+						if ((this->numSuccessRReply[recvdMsg->transID] >= REPLICA_QUORUM) && 
+							(this->numFailRReply[recvdMsg->transID] < REPLICA_QUORUM)) {
+
+							//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;	
+													
+						}
+						else if ((this->numSuccessRReply[recvdMsg->transID] < REPLICA_QUORUM) && 
+							(this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)) {
+							log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;
+						}
+						else if ((this->numFailRReply[recvdMsg->transID] >= REPLICA_QUORUM)){
+							log->logReadFail(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key);							
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;	
+						}
+					} 
+					else {
+						//log->logReadSuccess(&this->memberNode->addr, true, recvdMsg->transID, recvdMsg->key, recvdMsg->value);
+							//this->numSuccessReply[recvdMsg->transID] = 0;
+							//this->numFailReply[recvdMsg->transID] = 0;		
+					}
+					cout << "END READREPLY Transaction ID = " << currTransID << endl << endl;
+
+				}
+
 
 				break;
 
@@ -881,11 +970,19 @@ void MP2Node::checkMessages() {
 	 */
 
 	for (int i = 0; i < MAX_G_TRANS; i++) {
+		/* Do we have a prev readreply with just 1 ack */
 		if (numSuccessRReply[i] == 1) {
-			/* we have a prev readreply with just 1 ack */
-			cout << "Alert! Found a READREPLY with just 1 ACK. TransID = " << i << endl;
-			log->logReadFail(&this->memberNode->addr, true, i, currKey);
-			numSuccessRReply[i] = 0;
+			if (recvdMsg->delimiter == "||") {
+				cout << "Alert! Found a UPDATEREPLY with just 1 ACK. TransID = " << i << endl;
+				log->logUpdateFail(&this->memberNode->addr, true, i, currKey, currValue);
+				numSuccessRReply[i] = 0;
+			}
+			else {
+				cout << "Alert! Found a READREPLY with just 1 ACK. TransID = " << i << endl;
+				log->logReadFail(&this->memberNode->addr, true, i, currKey);
+				numSuccessRReply[i] = 0;	
+			}
+			
 			break;
 		}
 	}

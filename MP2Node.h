@@ -95,6 +95,7 @@ public:
 	void createReply(int transID,  Address *toAddr, MessageType type, bool result, string key, string value, ReplicaType replica);
 	bool deletekey(string key);
 	void readReply(int transID,  Address *toAddr, MessageType type, bool result, string key, string value);
+	void updateReply(int transID,  Address *toAddr, MessageType type, bool result, string key, string value);
 
 	// stabilization protocol - handle multiple failures
 	void stabilizationProtocol();
